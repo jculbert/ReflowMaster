@@ -56,9 +56,12 @@
 #include "Adafruit_GFX.h" // Add from Library Manager
 #include "Adafruit_ILI9341.h" // Add from Library Manager
 #include "MAX31855.h"
+#if 0
 #include "OneButton.h" // Add from Library Manager
+#endif
 #include "ReflowMasterProfile.h"
 #include "FlashStorage.h"
+#include "TouchScreen.h"
 
 // used to obtain the size of an array of any type
 #define ELEMENTS(x)   (sizeof(x) / sizeof(x[0]))
@@ -67,23 +70,36 @@
 #define DEBUG
 
 // TFT SPI pins
-#define TFT_DC 0
-#define TFT_CS 3
+#define TFT_DC 6
+#define TFT_CS 7
 #define TFT_RESET 1
 
 // MAX 31855 Pins
-#define MAXDO   11
-#define MAXCS   10
-#define MAXCLK  12
+#define MAXDO   5
+#define MAXCS   3
+#define MAXCLK  4
 
+#if 0
 #define BUTTON0 A0 // menu buttons
 #define BUTTON1 A1 // menu buttons
 #define BUTTON2 A2 // menu buttons
 #define BUTTON3 A3 // menu buttons
+#endif
 
-#define BUZZER A4  // buzzer
-#define RELAY 5    // relay control
-#define FAN A5     // fan control
+#define BUZZER A1  // buzzer
+#define RELAY A3    // relay control, note this pin supports PWM and Timer
+#define FAN A2     // fan control
+
+#define TOUCHSCREEN_YP A5  // must be an analog pin, use "An" notation!
+#define TOUCHSCREEN_XM A6  // must be an analog pin, use "An" notation!
+#define TOUCHSCREEN_YM 0   // can be a digital pin
+#define TOUCHSCREEN_XP 1   // can be a digital pin
+
+// For better pressure precision, we need to know the resistance
+// between X+ and X- Use any multimeter to read it
+// For the one we're using, its 300 ohms across the X plate
+// JC measured to be 300 ohm
+TouchScreen ts = TouchScreen(TOUCHSCREEN_XP, TOUCHSCREEN_YP, TOUCHSCREEN_XM, TOUCHSCREEN_YM, 300);
 
 // Just a bunch of re-defined colours
 #define BLUE      0x001F
@@ -221,11 +237,13 @@ Adafruit_ILI9341 tft = Adafruit_ILI9341(TFT_CS, TFT_DC, TFT_RESET);
 // Initialise the MAX31855 IC for thermocouple tempterature reading
 MAX31855 tc(MAXCLK, MAXCS, MAXDO);
 
+#if 0
 // Initialise the buttons using OneButton library
 OneButton button0(BUTTON0, false);
 OneButton button1(BUTTON1, false);
 OneButton button2(BUTTON2, false);
 OneButton button3(BUTTON3, false);
+#endif
 
 // UI button positions and sizes
 int buttonPosY[] = { 19, 74, 129, 184 };
@@ -236,6 +254,89 @@ int buttonWidth = 4;
 Settings set;
 // Initialise flash storage
 FlashStorage(flash_store, Settings);
+
+void ProcessTouchScreen()
+{
+  // buffer the last N points
+  // detect pressed and not pressed based on
+  // number valid (z > x) and delta in X values
+  #define HIST_SIZE (20)
+  static int head = HIST_SIZE - 1;
+  static int hist_count = 0;
+  static TSPoint history[HIST_SIZE];
+  static bool pressed = false;
+  static unsigned long pressed_time;
+
+  // Limit frequency of polling
+  static unsigned long last_time = 0;
+  unsigned long now = millis();
+  if (now - last_time < 10)
+    return;
+  last_time = now;     
+
+  head = (head + 1) % HIST_SIZE;
+  history[head] = ts.getPoint();
+
+  if (hist_count < HIST_SIZE) {
+    hist_count++;
+    if (hist_count <  HIST_SIZE)
+      return; // Not enough history
+  }
+  
+  int low_x = 5000;
+  int high_x = 0;
+  int valid = 0;
+  for (int i = 0; i < HIST_SIZE; i++) {
+    TSPoint *p = history + i; 
+
+    if(p->z < 50 || p->z > 1000)
+      continue; // not valid
+
+    valid++;
+    if (p->x < low_x)
+      low_x = p->x;
+    if (p->x > high_x)
+      high_x = p->x; 
+  }
+
+  if(valid >= 4 && high_x - low_x < 100)
+  {
+    if (!pressed)
+    {
+      pressed = true;
+      hist_count = 0; // flush history
+      Serial.println("pressed");
+      pressed_time = now;
+      //delay(20000);     
+    }
+  } else {
+    if (pressed)
+    {
+      pressed = false;
+      hist_count = 0; // flush history
+      Serial.print("not pressed, t = ");
+      Serial.println(now - pressed_time);
+#if 0
+      Serial.println(valid);     
+      Serial.println(high_x);
+      Serial.println(low_x);
+      Serial.println(high_x - low_x);
+      for (int j = 0; j < HIST_SIZE; j++) {
+        Serial.print(history[j].x);
+        Serial.print(" ");
+        Serial.println(history[j].z);
+      }
+      delay(20000);
+#endif     
+    }
+  }
+
+#if 0      
+  Serial.print("X = "); Serial.print(p.x);
+  Serial.print(" Y = "); Serial.print(p.y);
+  Serial.print(" P = "); Serial.println(p.z);
+#endif
+}
 
 // This is where we initialise each of the profiles that will get loaded into the Reflkow Master
 void LoadPaste()
@@ -341,13 +442,17 @@ void setup()
   pinMode( BUZZER, OUTPUT );
   pinMode( RELAY, OUTPUT );
   pinMode( FAN, OUTPUT );
+#if 0
   pinMode( BUTTON0, INPUT );
   pinMode( BUTTON1, INPUT );
   pinMode( BUTTON2, INPUT );
   pinMode( BUTTON3, INPUT );
+#endif
 
+#if 0
   // Turn of Green Debug LED
   pinMode( 13, INPUT );
+#endif
 
   // Turn off the SSR - duty cycle of 0
   SetRelayFrequency( 0 );
@@ -370,6 +475,7 @@ void setup()
     flash_store.write(set);
   }
 
+#if 0
   // Attatch button IO for OneButton
   button0.attachClick(button0Press);
   button1.attachClick(button1Press);
@@ -381,6 +487,7 @@ void setup()
   button2.attachDuringLongPress(button2LongPress);
   button3.attachLongPressStart(button3LongPressStart);
   button3.attachDuringLongPress(button3LongPress);
+#endif
 
   debug_println("TFT Begin...");
 
@@ -441,11 +548,15 @@ void DisplayTemp( bool center = false )
 
 void loop()
 {
+#if 0
   // Used by OneButton to poll for button inputs
   button0.tick();
   button1.tick();
   button2.tick();
   button3.tick();
+#endif
+
+  ProcessTouchScreen();
 
   // Current activity state machine
   if ( state == BOOT ) // BOOT
