@@ -55,7 +55,8 @@
 #include "spline.h"
 #include "Adafruit_GFX.h" // Add from Library Manager
 #include "Adafruit_ILI9341.h" // Add from Library Manager
-#include "MAX31855.h"
+//#include "MAX31855.h"
+#include "max6675.h"
 #if 0
 #include "OneButton.h" // Add from Library Manager
 #endif
@@ -235,7 +236,8 @@ Spline baseCurve;
 Adafruit_ILI9341 tft = Adafruit_ILI9341(TFT_CS, TFT_DC, TFT_RESET);
 
 // Initialise the MAX31855 IC for thermocouple tempterature reading
-MAX31855 tc(MAXCLK, MAXCS, MAXDO);
+//MAX31855 tc(MAXCLK, MAXCS, MAXDO);
+MAX6675 tc(MAXCLK, MAXCS, MAXDO);
 
 #if 0
 // Initialise the buttons using OneButton library
@@ -266,6 +268,7 @@ void ProcessTouchScreen()
   static TSPoint history[HIST_SIZE];
   static bool pressed = false;
   static unsigned long pressed_time;
+  static int pressed_line = 0;
 
   // Limit frequency of polling
   static unsigned long last_time = 0;
@@ -285,6 +288,7 @@ void ProcessTouchScreen()
   
   int low_x = 5000;
   int high_x = 0;
+  unsigned long avg_x = 0;
   int valid = 0;
   for (int i = 0; i < HIST_SIZE; i++) {
     TSPoint *p = history + i; 
@@ -293,29 +297,55 @@ void ProcessTouchScreen()
       continue; // not valid
 
     valid++;
+    avg_x += p->x;
     if (p->x < low_x)
       low_x = p->x;
     if (p->x > high_x)
       high_x = p->x; 
   }
 
-  if(valid >= 4 && high_x - low_x < 100)
-  {
-    if (!pressed)
-    {
+  if(valid >= 4 && high_x - low_x < 100) {
+    if (!pressed) {
       pressed = true;
       hist_count = 0; // flush history
-      Serial.println("pressed");
       pressed_time = now;
-      //delay(20000);     
+
+      avg_x /= valid;
+      if (avg_x > 680)
+        pressed_line = 0;
+      else if (avg_x > 560)     
+        pressed_line = 1;
+      else if (avg_x > 440)     
+        pressed_line = 2;
+      else
+        pressed_line = 3;
+      Serial.print("pressed line ");
+      Serial.println(pressed_line);
+      //delay(20000);
     }
   } else {
-    if (pressed)
-    {
+    if (pressed) {
       pressed = false;
       hist_count = 0; // flush history
       Serial.print("not pressed, t = ");
       Serial.println(now - pressed_time);
+
+      switch(pressed_line) {
+        case 0:
+          button0Press();
+          break;
+        case 1:
+          button1Press();
+          break;
+        case 2:
+          button2Press();
+          break;
+        case 3:
+        default:
+          button3Press();
+          break;
+      }
+      
 #if 0
       Serial.println(valid);     
       Serial.println(high_x);
@@ -498,9 +528,11 @@ void setup()
 
   delay(200);
 
+#if 0
   // Start up the MAX31855
   debug_println("Thermocouple Begin...");
   tc.begin();
+#endif
 
   // delay for initial temp probe read to be garbage
   delay(500);
@@ -797,7 +829,7 @@ void loop()
   {
     if ( nextTempAvgRead < millis() )
     {
-      nextTempAvgRead = millis() + 100;
+      nextTempAvgRead = millis() + 500;
       ReadCurrentTempAvg();
     }
     if ( nextTempRead < millis() )
@@ -912,6 +944,7 @@ void KeepFanOnCheck()
     StartFan( false );
 }
 
+#if 0
 void ReadCurrentTempAvg()
 {
   int status = tc.read();
@@ -946,6 +979,48 @@ void ReadCurrentTemp()
     tcError = 0;
     tc.getInternal(); // required by the TC to get the correct compensated value back
     currentTemp = tc.getTemperature() + set.tempOffset;
+    currentTemp =  constrain(currentTemp, -10, 350);
+
+    debug_print("TC Read: ");
+    debug_println( currentTemp );
+  }
+}
+#endif
+
+void ReadCurrentTempAvg()
+{
+  float t = tc.readCelsius();
+
+  if (t == NAN)
+  {
+    tcError = 101;
+    //tcError = 0;
+    //t = 33; // Display special temp indicating error reading
+    debug_println("TC Read Error x");
+  }
+  else
+  {
+    tcError = 0;
+    currentTempAvg += t + set.tempOffset;
+    avgReadCount++;
+  }
+}
+
+// Read the temp probe
+void ReadCurrentTemp()
+{
+  float t = tc.readCelsius();
+
+  if (t == NAN)
+  {
+    tcError = 101;
+    //tcError = 0;
+    //t = 27; // Display special temp indicating error reading
+    debug_println("TC Read Error y");
+  }
+  else
+  {
+    currentTemp = t + set.tempOffset;
     currentTemp =  constrain(currentTemp, -10, 350);
 
     debug_print("TC Read: ");
