@@ -55,8 +55,7 @@
 #include "spline.h"
 #include "Adafruit_GFX.h" // Add from Library Manager
 #include "Adafruit_ILI9341.h" // Add from Library Manager
-//#include "MAX31855.h"
-#include "max6675.h"
+#include "Adafruit_MAX31856.h"
 #if 0
 #include "OneButton.h" // Add from Library Manager
 #endif
@@ -77,6 +76,7 @@
 
 // MAX 31855 Pins
 #define MAXDO   5
+#define MAXDI   2
 #define MAXCS   3
 #define MAXCLK  4
 
@@ -235,9 +235,8 @@ Spline baseCurve;
 // Initialise the TFT screen
 Adafruit_ILI9341 tft = Adafruit_ILI9341(TFT_CS, TFT_DC, TFT_RESET);
 
-// Initialise the MAX31855 IC for thermocouple tempterature reading
-//MAX31855 tc(MAXCLK, MAXCS, MAXDO);
-MAX6675 tc(MAXCLK, MAXCS, MAXDO);
+// Initialise the MAX31856 IC for thermocouple tempterature reading
+Adafruit_MAX31856 tc = Adafruit_MAX31856(MAXCS, MAXDI, MAXDO, MAXCLK);
 
 #if 0
 // Initialise the buttons using OneButton library
@@ -528,12 +527,12 @@ void setup()
 
   delay(200);
 
-#if 0
-  // Start up the MAX31855
-  debug_println("Thermocouple Begin...");
-  tc.begin();
-#endif
-
+  // Start up the MAX31856
+  if (tc.begin())
+    debug_println("Thermocouple Begin returned true");
+  else
+    debug_println("Thermocouple Begin returned false");
+  
   // delay for initial temp probe read to be garbage
   delay(500);
 
@@ -944,89 +943,38 @@ void KeepFanOnCheck()
     StartFan( false );
 }
 
-#if 0
-void ReadCurrentTempAvg()
-{
-  int status = tc.read();
-
-  if (status != 0 )
-  {
-    tcError = status;
-    debug_print("TC Read Error Status: ");
-    debug_println( status );
-  }
-  else
-  {
-    tcError = 0;
-    tc.getInternal(); // required by the TC to get the correct compensated value back
-    currentTempAvg += tc.getTemperature() + set.tempOffset;
-    avgReadCount++;
-  }
-}
-
 // Read the temp probe
 void ReadCurrentTemp()
 {
-  int status = tc.read();
-  if (status != 0 )
-  {
-    tcError = status;
-    debug_print("TC Read Error Status: ");
-    debug_println( status );
+  float t = tc.readThermocoupleTemperature();
+  uint8_t fault = tc.readFault();
+  if (fault) {
+    if (fault & MAX31856_FAULT_CJRANGE) Serial.println("Cold Junction Range Fault");
+    if (fault & MAX31856_FAULT_TCRANGE) Serial.println("Thermocouple Range Fault");
+    if (fault & MAX31856_FAULT_CJHIGH)  Serial.println("Cold Junction High Fault");
+    if (fault & MAX31856_FAULT_CJLOW)   Serial.println("Cold Junction Low Fault");
+    if (fault & MAX31856_FAULT_TCHIGH)  Serial.println("Thermocouple High Fault");
+    if (fault & MAX31856_FAULT_TCLOW)   Serial.println("Thermocouple Low Fault");
+    if (fault & MAX31856_FAULT_OVUV)    Serial.println("Over/Under Voltage Fault");
+    if (fault & MAX31856_FAULT_OPEN)    Serial.println("Thermocouple Open Fault");
+    tcError = 101;
+    currentTemp = 5; // Impossible value to show error
+    return;
   }
-  else
-  {
-    tcError = 0;
-    tc.getInternal(); // required by the TC to get the correct compensated value back
-    currentTemp = tc.getTemperature() + set.tempOffset;
-    currentTemp =  constrain(currentTemp, -10, 350);
 
-    debug_print("TC Read: ");
-    debug_println( currentTemp );
-  }
+  tcError = 0;
+  currentTemp =  constrain(t, -10, 350);
+  debug_print("TC Read: ");
+  debug_println(currentTemp);
 }
-#endif
 
 void ReadCurrentTempAvg()
 {
-  float t = tc.readCelsius();
-
-  if (t == NAN)
-  {
-    tcError = 101;
-    //tcError = 0;
-    //t = 33; // Display special temp indicating error reading
-    debug_println("TC Read Error x");
-  }
-  else
-  {
-    tcError = 0;
-    currentTempAvg += t + set.tempOffset;
-    avgReadCount++;
-  }
+  ReadCurrentTemp();
+  currentTempAvg += currentTemp + set.tempOffset;
+  avgReadCount++;
 }
 
-// Read the temp probe
-void ReadCurrentTemp()
-{
-  float t = tc.readCelsius();
-
-  if (t == NAN)
-  {
-    tcError = 101;
-    //tcError = 0;
-    //t = 27; // Display special temp indicating error reading
-    debug_println("TC Read Error y");
-  }
-  else
-  {
-    currentTemp = t + set.tempOffset;
-    currentTemp =  constrain(currentTemp, -10, 350);
-
-    debug_print("TC Read: ");
-    debug_println( currentTemp );
-  }
-}
 
 void MatchTemp_Bake()
 {
