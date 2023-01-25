@@ -687,7 +687,7 @@ void loop()
     {
       if ( nextTempAvgRead < millis() )
       {
-        nextTempAvgRead = millis() + 100;
+        nextTempAvgRead = millis() + 250;
         ReadCurrentTempAvg();
       }
 
@@ -828,7 +828,7 @@ void loop()
   {
     if ( nextTempAvgRead < millis() )
     {
-      nextTempAvgRead = millis() + 500;
+      nextTempAvgRead = millis() + 250;
       ReadCurrentTempAvg();
     }
     if ( nextTempRead < millis() )
